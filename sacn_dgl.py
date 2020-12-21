@@ -263,7 +263,7 @@ def main(args):
     test_data = data.test
     num_rels = data.num_rels
 
-    stopper = EarlyStopping(patience=1)
+    stopper = EarlyStopping(patience=20)
 
     # check cuda
     if args.gpu >= 0:
@@ -397,12 +397,10 @@ if __name__ == '__main__':
                         help="gpu")
     parser.add_argument("--lr", type=float, default=0.002,
                         help="learning rate")
-    parser.add_argument("--n-layers", type=int, default=2,
-                        help="number of propagation rounds")
     parser.add_argument("--n-epochs", type=int, default=500,
                         help="number of training epochs")
     parser.add_argument('--num_workers', type=int, default=2)
-    parser.add_argument("--eval-every", type=int, default=1)
+    parser.add_argument("--eval-every", type=int, default=5)
     parser.add_argument("-d", "--dataset", type=str, required=True,
                         help="dataset to use")
     parser.add_argument("--batch-size", type=int, default=128,
