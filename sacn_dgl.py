@@ -365,8 +365,8 @@ def main(args):
             print("epoch : {}".format(epoch))
             with torch.no_grad():
                 val_mrr = ranking_and_hits(g, all_rel, model, valid_dataloader, 'dev_evaluation', entity_id, device)
-        if stopper.step(val_mrr, model):
-            break
+            if stopper.step(val_mrr, model):
+                break
 
     print("training done")
     print("Mean forward time: {:4f}s".format(np.mean(forward_time)))
