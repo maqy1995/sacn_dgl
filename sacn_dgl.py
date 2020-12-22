@@ -174,10 +174,8 @@ class EvalBatchPrepare(object):
         e2_batch = torch.from_numpy(e2_batch).reshape(-1, 1)
         rel_batch = torch.from_numpy(rel_batch).reshape(-1, 1)
         rel_reverse_batch = torch.from_numpy(rel_reverse_batch).reshape(-1, 1)
-        head_to_multi_tail_batch = np.array(head_to_multi_tail_list)
-        tail_to_multi_head_batch = np.array(tail_to_multi_head_list)
 
-        return e1_batch, e2_batch, rel_batch, rel_reverse_batch, head_to_multi_tail_batch, tail_to_multi_head_batch
+        return e1_batch, e2_batch, rel_batch, rel_reverse_batch, head_to_multi_tail_list, tail_to_multi_head_list
 
 
 class TrainBatchPrepare(object):

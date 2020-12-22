@@ -37,7 +37,7 @@ def ranking_and_hits(g, v, model, dev_rank_batcher, name, entity_id, device):
         # e2_multi1, e2_multi2 = e2_multi1.data, e2_multi2.data
 
         batch_score_start_time = time.time()
-        for i in range(e2_multi1.shape[0]):
+        for i in range(len(e2_multi1)):
             # these filters contain ALL labels
             filter1 = e2_multi1[i]
             filter2 = e2_multi2[i]
@@ -60,7 +60,7 @@ def ranking_and_hits(g, v, model, dev_rank_batcher, name, entity_id, device):
 
         argsort1 = argsort1.cpu().numpy()
         argsort2 = argsort2.cpu().numpy()
-        for i in range(e2_multi1.shape[0]):
+        for i in range(len(e2_multi1)):
             # find the rank of the target entities
             rank1 = np.where(argsort1[i] == e2.cpu().numpy()[i, 0])[0][0]
             rank2 = np.where(argsort2[i] == e1.cpu().numpy()[i, 0])[0][0]
