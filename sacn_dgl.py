@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Description: SACN from github.com/JD-AI-Research-Silicon-Valley/SACN,
-             Use DGL to implement GraphConvolution
+             Use DGL to implement GraphConvolution.
 """
 
 import argparse
@@ -20,6 +20,7 @@ from torch.utils.data import DataLoader
 
 from evaluation_dgl import ranking_and_hits
 from utils import EarlyStopping
+from batch_prepare import TrainBatchPrepare, EvalBatchPrepare
 
 
 # GCN
@@ -108,7 +109,6 @@ class SACN(torch.nn.Module):
         xavier_normal_(self.gc2.weight.data)
 
     def forward(self, g, all_edge, e1, rel, entity_id):
-        # X是0-entities的list，这里相当于得到各entities初始的embedding
         emb_initial = self.emb_e(entity_id)
         x = self.gc1(g, all_edge, emb_initial)
 
@@ -141,73 +141,10 @@ class SACN(torch.nn.Module):
         return pred
 
 
-## TODO 注释
-class EvalBatchPrepare(object):
-    # eval_dict实际上用到了train、valid、test中的所有数据
-    def __init__(self, eval_dict, num_rels):
-        self.eval_dict = eval_dict
-        self.num_rels = num_rels
-
-    def get_batch(self, batch_trip):
-        batch_trip = np.asarray(batch_trip)
-        e1_batch = batch_trip[:, 0]
-        rel_batch = batch_trip[:, 1]
-        e2_batch = batch_trip[:, 2]
-        # 全部加上num_rels当做rel_reverse的类别
-        rel_reverse_batch = rel_batch + self.num_rels
-
-        keys1 = list(zip(e1_batch, rel_batch))
-        keys2 = list(zip(e2_batch, rel_reverse_batch))
-        head_to_multi_tail_list = []
-        tail_to_multi_head_list = []
-        # 类比原来的e2_multi1
-        for key in keys1:
-            cur_tail_id_list = list(self.eval_dict.get(key))
-            head_to_multi_tail_list.append(np.asarray(cur_tail_id_list))
-
-        for key in keys2:
-            cur_tail_id_list = list(self.eval_dict.get(key))
-            tail_to_multi_head_list.append(np.asarray(cur_tail_id_list))
-
-        # TODO 考虑一下是否这里不加入到GPU中，交由外部加入
-        e1_batch = torch.from_numpy(e1_batch).reshape(-1, 1)
-        e2_batch = torch.from_numpy(e2_batch).reshape(-1, 1)
-        rel_batch = torch.from_numpy(rel_batch).reshape(-1, 1)
-        rel_reverse_batch = torch.from_numpy(rel_reverse_batch).reshape(-1, 1)
-
-        return e1_batch, e2_batch, rel_batch, rel_reverse_batch, head_to_multi_tail_list, tail_to_multi_head_list
-
-
-class TrainBatchPrepare(object):
-    def __init__(self, train_dict, num_nodes):
-        self.entity_num = num_nodes
-        self.train_dict = train_dict
-
-    def get_batch(self, batch_trip):
-        # batch_trip是一个batch的三元组，shape为(batch_size, 3)
-        batch_trip = np.asarray(batch_trip)
-        e1_batch = batch_trip[:, 0]
-        rel_batch = batch_trip[:, 1]
-        keys = list(zip(e1_batch, rel_batch))
-
-        # 得到dict中的每个e1,re1对应的所有e2 id，并形成one hot形式。
-        e2_multi1_binary = np.zeros((batch_trip.shape[0], self.entity_num), dtype=np.float32)
-        cur_row = 0
-        for key in keys:
-            indices = list(self.train_dict.get(key))
-            e2_multi1_binary[cur_row][indices] = 1
-            cur_row += 1
-
-        e1_batch = torch.from_numpy(e1_batch).reshape(-1, 1)
-        rel_batch = torch.from_numpy(rel_batch).reshape(-1, 1)
-        e2_multi1_binary = torch.from_numpy(e2_multi1_binary)
-
-        return e1_batch, rel_batch, e2_multi1_binary
-
-
 def process_triplets(triplets, all_dict, num_rels):
     """
-    处理三元组，存储(head,rel)和(tail,rel_reverse)分别对应的所有entity的id
+    process triples, store the id of all entities corresponding to (head, rel)
+    and (tail, rel_reverse) into dict
     """
     data_dict = {}
     for i in range(triplets.shape[0]):
@@ -227,24 +164,15 @@ def process_triplets(triplets, all_dict, num_rels):
         all_dict[(e1, rel)].add(e2)
         all_dict[(e2, rel_reverse)].add(e1)
 
-        # data
         data_dict[(e1, rel)].add(e2)
         data_dict[(e2, rel_reverse)].add(e1)
 
     return data_dict
 
 
-# TODO 用一个函数，构建对应需要用到的信息，返回train_dict, valid_dict, test_dict, split_triple_list
-#  train_dict, valid_dict, test_dict分别是train、valid、和test中所有的（K,V）信息，
-#  这里信息指的是(head, rel)作为key，tail作为value的集合。
-#  split_triple_list中分别存储了train、valid和test中的三元组。train、valid、test分别对应一个list
 def preprocess_data(train_data, valid_data, test_data, num_rels):
-    """
-    all_dict用于计算ranking时，获取所有的正确的样本
-    """
     all_dict = {}
 
-    # train_dict中存储了(e1,rel)和(e1,rel_reverse)对应的所有node的dict
     train_dict = process_triplets(train_data, all_dict, num_rels)
     valid_dict = process_triplets(valid_data, all_dict, num_rels)
     test_dict = process_triplets(test_data, all_dict, num_rels)
@@ -261,7 +189,7 @@ def main(args):
     test_data = data.test
     num_rels = data.num_rels
 
-    stopper = EarlyStopping(patience=20)
+    stopper = EarlyStopping(patience=args.patience)
 
     # check cuda
     if args.gpu >= 0:
@@ -276,21 +204,21 @@ def main(args):
     g = dgl.graph([])
     g.add_nodes(num_nodes)
     src, rel, dst = train_data.transpose()
+    # add reverse edges, reverse relation id is between [num_rels, 2*num_rels)
     src, dst = np.concatenate((src, dst)), np.concatenate((dst, src))
-    # Attention: reverse rel id is between [num_rels, 2* num_rels)
     rel = np.concatenate((rel, rel + num_rels))
-    # build new train_data with reverse relation
+    # get new train_data with reverse relation
     train_data_new = np.stack((src, rel, dst)).transpose()
 
-    # 去个重试试？
+    # unique train data by (h,r)
     train_data_new_pandas = pandas.DataFrame(train_data_new)
     train_data_new_pandas = train_data_new_pandas.drop_duplicates([0, 1])
-    train_data_new = np.asarray(train_data_new_pandas)
+    train_data_unique = np.asarray(train_data_new_pandas)
 
     g.add_edges(src, dst)
     # add graph self loop
     g.add_edges(g.nodes(), g.nodes())
-    # add self loop relation type
+    # add self loop relation type, self loop relation's id is 2*num_rels.
     rel = np.concatenate((rel, np.ones([num_nodes]) * num_rels * 2))
     print(g)
     entity_id = torch.LongTensor([i for i in range(num_nodes)])
@@ -303,21 +231,17 @@ def main(args):
     # optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
-    forward_time = []
-    backward_time = []
-
-    # TODO 这里valid_dict和test_dict后面并没有用到
+    # process the triples and get all tails corresponding to (h,r)
+    # here valid_dict and test_dict are not used.
     train_dict, valid_dict, test_dict, all_dict = preprocess_data(train_data, valid_data, test_data, num_rels)
 
     train_batch_prepare = TrainBatchPrepare(train_dict, num_nodes)
 
+    # eval needs to use all the data in train_data, valid_data and test_data
     eval_batch_prepare = EvalBatchPrepare(all_dict, num_rels)
-    # training loop
-    print("start training...")
-    # TODO 得到每一个batch对应的+e2_multi11_binary
-    tarin_dataloader = DataLoader(
-        # TODO 注意train_data中也应该包含reverse,但不应该包括自环，直接用构建dgl graph的可能好点
-        dataset=train_data_new,
+
+    train_dataloader = DataLoader(
+        dataset=train_data_unique,
         batch_size=args.batch_size,
         collate_fn=train_batch_prepare.get_batch,
         shuffle=True,
@@ -340,37 +264,36 @@ def main(args):
         drop_last=False,
         num_workers=args.num_workers)
 
+    # training loop
+    print("start training...")
     for epoch in range(args.n_epochs):
         model.train()
         epoch_start_time = time.time()
-        for step, batch_tuple in enumerate(tarin_dataloader):
-            e1_batch, rel_batch, e2_multi1_binary = batch_tuple
+        for step, batch_tuple in enumerate(train_dataloader):
+            e1_batch, rel_batch, labels_one_hot = batch_tuple
             e1_batch = e1_batch.to(device)
             rel_batch = rel_batch.to(device)
-            e2_multi1_binary = e2_multi1_binary.to(device)
-            e2_multi1_binary = ((1.0 - 0.1) * e2_multi1_binary) + (1.0 / e2_multi1_binary.size(1))
+            labels_one_hot = labels_one_hot.to(device)
+            labels_one_hot = ((1.0 - 0.1) * labels_one_hot) + (1.0 / labels_one_hot.size(1))
+
             pred = model.forward(g, all_rel, e1_batch, rel_batch, entity_id)
-            # loss的计算有点麻烦，需要得到e2_multi11_binary,即(e1,rel)真正存在的e2作为标签1，其他为0,维度为(batch_size,nodes_num)
             optimizer.zero_grad()
-            loss = model.loss(pred, e2_multi1_binary)
+            loss = model.loss(pred, labels_one_hot)
             loss.backward()
             optimizer.step()
 
+        print("epoch : {}".format(epoch))
         print("epoch time: {:.4f}".format(time.time() - epoch_start_time))
         print("loss: {}".format(loss.data))
-        print()
 
         model.eval()
         if epoch % args.eval_every == 0:
-            print("epoch : {}".format(epoch))
             with torch.no_grad():
                 val_mrr = ranking_and_hits(g, all_rel, model, valid_dataloader, 'dev_evaluation', entity_id, device)
             if stopper.step(val_mrr, model):
                 break
 
     print("training done")
-    print("Mean forward time: {:4f}s".format(np.mean(forward_time)))
-    print("Mean Backward time: {:4f}s".format(np.mean(backward_time)))
     model.load_state_dict(torch.load('es_checkpoint.pt'))
     ranking_and_hits(g, all_rel, model, test_dataloader, 'test_evaluation', entity_id, device)
 
@@ -386,7 +309,7 @@ if __name__ == '__main__':
     parser.add_argument("--input_dropout", type=float, default=0,
                         help="input feature dropout")
     parser.add_argument("--dropout_rate", type=float, default=0.2,
-                        help="dropout probability")
+                        help="dropout rate")
     parser.add_argument("--channels", type=int, default=200,
                         help="number of channels")
     parser.add_argument("--kernel_size", type=int, default=5,
@@ -395,14 +318,16 @@ if __name__ == '__main__':
                         help="gpu")
     parser.add_argument("--lr", type=float, default=0.002,
                         help="learning rate")
-    parser.add_argument("--n-epochs", type=int, default=500,
+    parser.add_argument("--n-epochs", type=int, default=5000,
                         help="number of training epochs")
     parser.add_argument('--num_workers', type=int, default=2)
-    parser.add_argument("--eval-every", type=int, default=5)
-    parser.add_argument("-d", "--dataset", type=str, required=True,
+    parser.add_argument("--eval-every", type=int, default=1)
+    parser.add_argument("-d", "--dataset", type=str, default="FB15k-237",
                         help="dataset to use")
     parser.add_argument("--batch-size", type=int, default=128,
                         help="batch size")
+    parser.add_argument("--patience", type=int, default=100,
+                        help="early stop patience")
 
     args = parser.parse_args()
     print(args)

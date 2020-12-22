@@ -1,7 +1,10 @@
+# -*- coding: utf-8 -*-
+"""
+code from github.com/JD-AI-Research-Silicon-Valley/SACN
+"""
+
 import torch
 import numpy as np
-import datetime
-
 import time
 
 
