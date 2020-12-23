@@ -56,7 +56,6 @@ class GraphConvolution(torch.nn.Module):
             train_edge_num = int((all_edge_type.shape[0] - input.shape[0]) / 2)
             transpose_all_edge_type = torch.cat((all_edge_type[train_edge_num:train_edge_num * 2],
                                                  all_edge_type[:train_edge_num], all_edge_type[-input.shape[0]:]))
-            # alp = self.alpha(torch.cat([all_edge_type, all_edge_type])).reshape(-1, 1)
             alp = self.alpha(all_edge_type) + self.alpha(transpose_all_edge_type)
             g.edata['a'] = alp
 

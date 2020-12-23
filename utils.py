@@ -1,3 +1,6 @@
+"""
+code from https://github.com/dmlc/dgl/blob/master/examples/pytorch/gat/utils.py
+"""
 import numpy as np
 import torch
 
