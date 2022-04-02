@@ -6,6 +6,10 @@ original code:"https://github.com/JD-AI-Research-Silicon-Valley/SACN"
 
 Excluding `spodernet` and implementing WGCN using DGL.
 
+Dependency:
+> dgl 0.5
+
+
 FB15K-237:
 params:
 ```
